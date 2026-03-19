@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "paths": {
+      "@snapalarm/shared-types": ["../../packages/shared-types/src"],
+      "@snapalarm/retry-engine": ["../../packages/retry-engine/src"],
+      "@snapalarm/ai-service": ["../../packages/ai-service/src"],
+      "@snapalarm/image-processor": ["../../packages/image-processor/src"]
+    }
+  },
+  "references": [
+    { "path": "../../packages/shared-types" },
+    { "path": "../../packages/retry-engine" },
+    { "path": "../../packages/ai-service" },
+    { "path": "../../packages/image-processor" }
+  ],
+  "include": ["src"]
+}

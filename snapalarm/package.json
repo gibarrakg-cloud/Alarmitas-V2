@@ -1,0 +1,27 @@
+{
+  "name": "snapalarm",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "yarn workspace @snapalarm/api dev",
+    "dev:mobile": "yarn workspace @snapalarm/mobile start",
+    "build:api": "yarn workspace @snapalarm/api build",
+    "test": "jest --projects packages/*/jest.config.ts apps/api/jest.config.ts",
+    "typecheck": "tsc --build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "@types/jest": "^29.5.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "yarn": ">=1.22.0"
+  }
+}

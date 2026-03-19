@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "paths": {
+      "@snapalarm/shared-types": ["../shared-types/src"],
+      "@snapalarm/retry-engine": ["../retry-engine/src"]
+    }
+  },
+  "references": [
+    { "path": "../shared-types" },
+    { "path": "../retry-engine" }
+  ],
+  "include": ["src"]
+}

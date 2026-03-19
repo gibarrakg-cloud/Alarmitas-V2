@@ -1,0 +1,19 @@
+{
+  "name": "@snapalarm/image-processor",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@snapalarm/shared-types": "*",
+    "sharp": "^0.33.4",
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@aws-sdk/s3-request-presigner": "^3.600.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}

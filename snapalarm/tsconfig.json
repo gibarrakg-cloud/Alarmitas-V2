@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared-types" },
+    { "path": "packages/retry-engine" },
+    { "path": "packages/ai-service" },
+    { "path": "packages/image-processor" },
+    { "path": "apps/api" }
+  ]
+}
