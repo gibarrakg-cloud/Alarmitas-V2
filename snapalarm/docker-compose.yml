@@ -50,7 +50,7 @@ services:
       DATABASE_URL: postgresql://snapalarm:snapalarm@postgres:5432/snapalarm
       REDIS_URL: redis://redis:6379
     ports:
-      - '3000:3000'
+      - '8081:8081'
     volumes:
       - ./apps/api:/app/apps/api
       - ./packages:/app/packages

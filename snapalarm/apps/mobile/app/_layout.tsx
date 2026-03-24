@@ -17,11 +17,9 @@ export default function RootLayout() {
             headerStyle: { backgroundColor: '#0f0f0f' },
             headerTintColor: '#ffffff',
             contentStyle: { backgroundColor: '#0f0f0f' },
+            headerShown: false,
           }}
-        >
-          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-          <Stack.Screen name="(app)" options={{ headerShown: false }} />
-        </Stack>
+        />
       </SafeAreaProvider>
     </QueryClientProvider>
   );

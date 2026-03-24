@@ -1,11 +1,21 @@
 import axios, { type AxiosInstance } from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 // ============================================================
 // API client — axios instance with JWT auto-refresh
 // ============================================================
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+function getDefaultBaseUrl(): string {
+  if (Platform.OS === 'android') {
+    // Android emulators reach the host machine through 10.0.2.2.
+    return 'http://10.0.2.2:3000';
+  }
+
+  return 'http://localhost:3000';
+}
+
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? getDefaultBaseUrl();
 
 export const api: AxiosInstance = axios.create({
   baseURL: BASE_URL,

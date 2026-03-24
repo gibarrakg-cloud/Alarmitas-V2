@@ -3,9 +3,19 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "@snapalarm/shared-types": ["../../packages/shared-types/src"],
-      "@/*": ["./*"]
+      "@snapalarm/shared-types": [
+        "../../packages/shared-types/src"
+      ],
+      "@/*": [
+        "./*"
+      ]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.d.ts"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.d.ts",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ]
 }

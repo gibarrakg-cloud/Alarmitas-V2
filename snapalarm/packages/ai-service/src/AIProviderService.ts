@@ -58,7 +58,8 @@ export class AIProviderService {
       },
     });
 
-    return engine.run(() => this.dispatch(request));
+    const result = await engine.run(() => this.dispatch(request));
+    return result.value;
   }
 
   // ---- Dispatcher ------------------------------------------

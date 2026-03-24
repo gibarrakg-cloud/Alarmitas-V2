@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+.turbo/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Expo / React Native
+.expo/
+apps/mobile/.expo/
+apps/mobile/expo-env.d.ts
+*.expo.*
+
+# Native build folders
+android/
+ios/
+apps/mobile/android/
+apps/mobile/ios/
+
+# Prisma / local databases
+*.db
+*.db-journal
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+
+

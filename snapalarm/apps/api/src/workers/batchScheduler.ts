@@ -2,9 +2,7 @@ import { Queue, Worker, type Job } from 'bullmq';
 import pino from 'pino';
 import { prisma } from '../prisma';
 import { AIProviderService } from '@snapalarm/ai-service';
-import { BatchRetryManager } from '@snapalarm/ai-service';
 import { ImageProcessor } from '@snapalarm/image-processor';
-import type { BatchJob, BatchResult, AIGenerationResult } from '@snapalarm/shared-types';
 
 // ============================================================
 // batchScheduler — BullMQ 4-window batch scheduler (UTC)
@@ -101,7 +99,7 @@ new Worker(
       // 2. Composite image with Sharp
       const image_result = await imageProcessor.overlay({
         input_s3_key: `originals/${user_id}/${alarm_id}.jpg`,
-        text: ai_result.value.generated_text,
+        text: ai_result.generated_text,
         watermark: false,
       });
 
@@ -112,23 +110,23 @@ new Worker(
           where: { id: alarm_id },
           data: {
             generationStatus: 'COMPLETED',
-            generatedText: ai_result.value.generated_text,
+            generatedText: ai_result.generated_text,
             generatedImageS3Key: image_result.output_s3_key,
             generatedImageUrl: image_result.output_url,
             generationCompletedAt: now,
             imageReadyAt: now,
-            retryCount: ai_result.attempts - 1,
+            retryCount: 0,
           },
         }),
         prisma.aIGenerationLog.create({
           data: {
             alarmId: alarm_id,
-            modelUsed: ai_result.value.model_used,
+            modelUsed: ai_result.model_used,
             humorLevel: humor_level,
-            tokensUsed: ai_result.value.tokens_used,
-            costUsd: ai_result.value.cost_usd,
-            durationMs: ai_result.value.duration_ms,
-            retryCount: ai_result.attempts - 1,
+            tokensUsed: ai_result.tokens_used,
+            costUsd: ai_result.cost_usd,
+            durationMs: ai_result.duration_ms,
+            retryCount: 0,
             batchOrSync: job.name === 'batch' ? 'batch' : 'sync',
           },
         }),
