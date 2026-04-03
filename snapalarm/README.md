@@ -49,7 +49,7 @@ EXPO_PUBLIC_API_URL=http://10.0.2.2:3000
 4. Si usas un dispositivo físico, cambia `EXPO_PUBLIC_API_URL` por la IP local de tu PC:
 
 ```env
-EXPO_PUBLIC_API_URL=http://192.168.x.x:3000
+EXPO_PUBLIC_API_URL=http://192.168.0.11:3000
 ```
 
 ## Primer arranque
