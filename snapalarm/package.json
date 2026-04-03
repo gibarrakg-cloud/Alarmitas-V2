@@ -7,8 +7,12 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "node scripts/dev-all.js",
     "dev:api": "yarn workspace @snapalarm/api dev",
     "dev:mobile": "yarn workspace @snapalarm/mobile start",
+    "dev:mobile:go": "yarn workspace @snapalarm/mobile start --go",
+    "dev:mobile:android": "yarn workspace @snapalarm/mobile start --go --host lan",
+    "dev:mobile:clean": "yarn workspace @snapalarm/mobile start --go --host lan -c",
     "build:api": "yarn workspace @snapalarm/api build",
     "test": "jest --projects packages/*/jest.config.ts apps/api/jest.config.ts",
     "typecheck": "tsc --build"
