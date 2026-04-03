@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../prisma';
 import { classifyAlarm } from '../workers/alarmClassifier';
 import { alarmQueue } from '../workers/batchScheduler';
-import type { CreateAlarmRequest, AlarmResponse, JwtPayload } from '@snapalarm/shared-types';
+import { computeNextRepeatingOccurrenceUtc } from '../utils/alarmSchedule';
+import type { CreateAlarmRequest, AlarmResponse, JwtPayload, AlarmWeekday } from '@snapalarm/shared-types';
 
 // ============================================================
 // Alarm routes
@@ -17,10 +18,47 @@ const CreateAlarmSchema = z.object({
   title: z.string().min(1).max(200),
   reason: z.string().min(1).max(500),
   humor_level: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
-  fire_time_utc: z.string().datetime(),
+  fire_time_utc: z.string().datetime().optional(),
   timezone_source: z.string(),
   mode: z.enum(['IMAGE_ONLY', 'IMAGE_WITH_AUDIO']),
+  schedule_type: z.enum(['ONE_TIME', 'REPEATING']),
+  repeat_days: z.array(z.union([
+    z.literal(0),
+    z.literal(1),
+    z.literal(2),
+    z.literal(3),
+    z.literal(4),
+    z.literal(5),
+    z.literal(6),
+  ])).optional(),
+  local_time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   original_image_base64: z.string().min(1),
+}).superRefine((value, ctx) => {
+  if (value.schedule_type === 'ONE_TIME' && !value.fire_time_utc) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['fire_time_utc'],
+      message: 'fire_time_utc is required for one-time alarms',
+    });
+  }
+
+  if (value.schedule_type === 'REPEATING') {
+    if (!value.local_time) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['local_time'],
+        message: 'local_time is required for repeating alarms',
+      });
+    }
+
+    if (!value.repeat_days?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['repeat_days'],
+        message: 'repeat_days must contain at least one weekday',
+      });
+    }
+  }
 });
 
 export async function alarmRoutes(app: FastifyInstance) {
@@ -36,13 +74,18 @@ export async function alarmRoutes(app: FastifyInstance) {
       orderBy: { fireTimeUtc: 'asc' },
       select: {
         id: true, title: true, reason: true, humorLevel: true,
-        fireTimeUtc: true, mode: true, generationStatus: true,
+        fireTimeUtc: true, scheduleType: true, repeatDays: true, localTime: true, timezoneSource: true,
+        mode: true, generationStatus: true,
         generatedImageUrl: true, generatedAudioUrl: true, generatedText: true,
         isActive: true, createdAt: true,
       },
     });
 
-    return reply.send(alarms.map(toAlarmResponse));
+    const responses = alarms
+      .map(toAlarmResponse)
+      .sort((a, b) => new Date(a.fire_time_utc).getTime() - new Date(b.fire_time_utc).getTime());
+
+    return reply.send(responses);
   });
 
   // ---- GET /alarms/:id ------------------------------------
@@ -67,7 +110,18 @@ export async function alarmRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() });
     }
 
-    const { title, reason, humor_level, fire_time_utc, timezone_source, mode, original_image_base64 } = parsed.data;
+    const {
+      title,
+      reason,
+      humor_level,
+      fire_time_utc,
+      timezone_source,
+      mode,
+      schedule_type,
+      repeat_days,
+      local_time,
+      original_image_base64,
+    } = parsed.data;
 
     // Check credit balance for FREE/BASIC tiers
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { credits: true } });
@@ -82,7 +136,13 @@ export async function alarmRoutes(app: FastifyInstance) {
     // NOTE: actual S3 upload delegated to alarmFallbackWorker / generation pipeline
     // Here we store the key and will process async
 
-    const fireTimeUtc = new Date(fire_time_utc);
+    const fireTimeUtc = schedule_type === 'REPEATING'
+      ? computeNextRepeatingOccurrenceUtc(
+          [...new Set((repeat_days ?? []).slice().sort((a, b) => a - b))] as AlarmWeekday[],
+          local_time!,
+          timezone_source,
+        )
+      : new Date(fire_time_utc!);
     const classification = classifyAlarm(fireTimeUtc);
 
     const alarm = await prisma.alarm.create({
@@ -92,6 +152,11 @@ export async function alarmRoutes(app: FastifyInstance) {
         reason,
         humorLevel: humor_level,
         fireTimeUtc,
+        scheduleType: schedule_type,
+        repeatDays: schedule_type === 'REPEATING'
+          ? [...new Set((repeat_days ?? []).slice().sort((a, b) => a - b))]
+          : [],
+        localTime: schedule_type === 'REPEATING' ? local_time! : null,
         timezoneSource: timezone_source,
         mode,
         originalImageS3Key: original_s3_key,
@@ -119,7 +184,7 @@ export async function alarmRoutes(app: FastifyInstance) {
         title,
         reason,
         humor_level,
-        fire_time_utc,
+        fire_time_utc: fireTimeUtc.toISOString(),
         classification_type: classification.type,
       },
       {
@@ -162,12 +227,23 @@ export async function alarmRoutes(app: FastifyInstance) {
 // ---- Response mapper -------------------------------------
 
 function toAlarmResponse(alarm: any): AlarmResponse {
+  const effectiveFireTimeUtc = alarm.scheduleType === 'REPEATING'
+    ? computeNextRepeatingOccurrenceUtc(
+        (alarm.repeatDays ?? []) as AlarmWeekday[],
+        alarm.localTime,
+        alarm.timezoneSource,
+      )
+    : alarm.fireTimeUtc;
+
   return {
     id: alarm.id,
     title: alarm.title,
     reason: alarm.reason,
     humor_level: alarm.humorLevel,
-    fire_time_utc: alarm.fireTimeUtc.toISOString(),
+    fire_time_utc: effectiveFireTimeUtc.toISOString(),
+    schedule_type: alarm.scheduleType,
+    repeat_days: (alarm.repeatDays ?? []) as AlarmWeekday[],
+    local_time: alarm.localTime ?? null,
     mode: alarm.mode,
     generation_status: alarm.generationStatus,
     generated_image_url: alarm.generatedImageUrl ?? null,

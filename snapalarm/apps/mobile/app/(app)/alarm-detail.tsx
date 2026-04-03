@@ -4,6 +4,17 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../src/api/client';
 import type { AlarmResponse } from '@snapalarm/shared-types';
 
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function formatSchedule(alarm: AlarmResponse): string {
+  if (alarm.schedule_type === 'REPEATING') {
+    const days = alarm.repeat_days.map((day) => WEEKDAY_LABELS[day]).join(', ');
+    return `Repeats ${days} at ${alarm.local_time ?? '--:--'}`;
+  }
+
+  return `One time on ${new Date(alarm.fire_time_utc).toLocaleString()}`;
+}
+
 export default function AlarmDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const queryClient = useQueryClient();
@@ -64,7 +75,8 @@ export default function AlarmDetailScreen() {
       <View style={styles.details}>
         <Row label="Title" value={alarm.title} />
         <Row label="Reason" value={alarm.reason} />
-        <Row label="Fire time" value={new Date(alarm.fire_time_utc).toLocaleString()} />
+        <Row label="Schedule" value={formatSchedule(alarm)} />
+        <Row label="Next fire" value={new Date(alarm.fire_time_utc).toLocaleString()} />
         <Row label="Status" value={alarm.generation_status.replace(/_/g, ' ')} />
         <Row label="Mode" value={alarm.mode === 'IMAGE_WITH_AUDIO' ? 'Image + Voice' : 'Image only'} />
       </View>

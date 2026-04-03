@@ -20,7 +20,7 @@ export default function LoginScreen() {
       const { data } = await api.post('/auth/login', { email, password });
       await SecureStore.setItemAsync('access_token', data.access_token);
       await SecureStore.setItemAsync('refresh_token', data.refresh_token);
-      router.replace('/(app)/alarms');
+      router.replace('/alarms');
     } catch (err: any) {
       Alert.alert('Login failed', err.response?.data?.error ?? 'Please try again');
     } finally {
@@ -57,7 +57,7 @@ export default function LoginScreen() {
         <Text style={styles.button_text}>{loading ? 'Signing in...' : 'Sign In'}</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
+      <TouchableOpacity onPress={() => router.push('/register')}>
         <Text style={styles.link}>Don't have an account? Register</Text>
       </TouchableOpacity>
     </KeyboardAvoidingView>

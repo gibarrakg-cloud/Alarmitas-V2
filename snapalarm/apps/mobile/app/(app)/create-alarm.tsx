@@ -5,9 +5,10 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../src/api/client';
-import type { HumorLevel, AlarmMode } from '@snapalarm/shared-types';
+import type { HumorLevel, AlarmMode, ScheduleType, AlarmWeekday } from '@snapalarm/shared-types';
 
 const HUMOR_LEVELS: { level: HumorLevel; label: string; description: string; color: string }[] = [
   { level: 1, label: 'Clean',      description: 'Warm & encouraging',     color: '#22c55e' },
@@ -15,6 +16,29 @@ const HUMOR_LEVELS: { level: HumorLevel; label: string; description: string; col
   { level: 3, label: 'Sarcastic',  description: 'Sharp & bold',           color: '#f59e0b' },
   { level: 4, label: 'Dark',       description: 'No filter comedy',       color: '#ef4444' },
 ];
+
+const WEEKDAYS: { value: AlarmWeekday; label: string }[] = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 0, label: 'Sun' },
+];
+
+function computeNextRepeatingOccurrenceLocal(repeatDays: AlarmWeekday[], timeSource: Date, now: Date = new Date()): Date {
+  for (let offset = 0; offset < 8; offset += 1) {
+    const candidate = new Date(now);
+    candidate.setDate(now.getDate() + offset);
+    candidate.setHours(timeSource.getHours(), timeSource.getMinutes(), 0, 0);
+
+    if (!repeatDays.includes(candidate.getDay() as AlarmWeekday)) continue;
+    if (candidate.getTime() > now.getTime()) return candidate;
+  }
+
+  throw new Error('Please choose at least one repeat day in the future');
+}
 
 export default function CreateAlarmScreen() {
   const queryClient = useQueryClient();
@@ -24,24 +48,44 @@ export default function CreateAlarmScreen() {
   const [mode, setMode] = useState<AlarmMode>('IMAGE_ONLY');
   const [image_uri, setImageUri] = useState<string | null>(null);
   const [image_base64, setImageBase64] = useState<string | null>(null);
-  const [fire_date, setFireDate] = useState('');
-  const [fire_time, setFireTime] = useState('');
+  const [scheduleType, setScheduleType] = useState<ScheduleType>('ONE_TIME');
+  const [scheduledAt, setScheduledAt] = useState<Date | null>(null);
+  const [repeatDays, setRepeatDays] = useState<AlarmWeekday[]>([1, 2, 3, 4, 5]);
+  const [repeatTime, setRepeatTime] = useState<Date>(() => {
+    const nextHour = new Date();
+    nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
+    return nextHour;
+  });
+  const [pickerMode, setPickerMode] = useState<'date' | 'time' | null>(null);
 
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!image_base64) throw new Error('Please select a photo');
+      if (scheduleType === 'ONE_TIME') {
+        if (!scheduledAt) throw new Error('Please choose a date and time');
+        if (scheduledAt.getTime() <= Date.now()) throw new Error('Alarm time must be in the future');
+      }
 
-      // Combine date + time and convert to UTC ISO string
-      const local_dt = new Date(`${fire_date}T${fire_time}:00`);
-      if (isNaN(local_dt.getTime())) throw new Error('Invalid date or time');
+      if (scheduleType === 'REPEATING' && repeatDays.length === 0) {
+        throw new Error('Please choose at least one repeat day');
+      }
+
+      const nextFireTime = scheduleType === 'REPEATING'
+        ? computeNextRepeatingOccurrenceLocal(repeatDays, repeatTime)
+        : scheduledAt!;
 
       await api.post('/alarms', {
         title,
         reason,
         humor_level,
-        fire_time_utc: local_dt.toISOString(),
+        fire_time_utc: nextFireTime.toISOString(),
         timezone_source: Intl.DateTimeFormat().resolvedOptions().timeZone,
         mode,
+        schedule_type: scheduleType,
+        repeat_days: scheduleType === 'REPEATING' ? repeatDays : [],
+        local_time: scheduleType === 'REPEATING'
+          ? `${String(repeatTime.getHours()).padStart(2, '0')}:${String(repeatTime.getMinutes()).padStart(2, '0')}`
+          : undefined,
         original_image_base64: image_base64,
       });
     },
@@ -76,7 +120,79 @@ export default function CreateAlarmScreen() {
     }
   };
 
-  const isValid = title.length > 0 && reason.length > 0 && image_base64 && fire_date && fire_time;
+  const openDatePicker = () => setPickerMode('date');
+  const openTimePicker = () => {
+    if (scheduleType === 'REPEATING') {
+      setPickerMode('time');
+      return;
+    }
+
+    if (!scheduledAt) {
+      setPickerMode('date');
+      return;
+    }
+    setPickerMode('time');
+  };
+
+  const handlePickerChange = (event: DateTimePickerEvent, value?: Date) => {
+    if (Platform.OS === 'android') {
+      setPickerMode(null);
+    }
+
+    if (event.type !== 'set' || !value) {
+      return;
+    }
+
+    if (pickerMode === 'date') {
+      const nextDate = scheduledAt ? new Date(scheduledAt) : new Date();
+      nextDate.setFullYear(value.getFullYear(), value.getMonth(), value.getDate());
+      nextDate.setSeconds(0, 0);
+      setScheduledAt(nextDate);
+
+      if (Platform.OS === 'android') {
+        setPickerMode('time');
+      }
+      return;
+    }
+
+    if (scheduleType === 'REPEATING') {
+      const nextTime = new Date(repeatTime);
+      nextTime.setHours(value.getHours(), value.getMinutes(), 0, 0);
+      setRepeatTime(nextTime);
+      return;
+    }
+
+    const nextDate = scheduledAt ? new Date(scheduledAt) : new Date();
+    nextDate.setHours(value.getHours(), value.getMinutes(), 0, 0);
+    setScheduledAt(nextDate);
+  };
+
+  const formattedDate = scheduledAt
+    ? scheduledAt.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+    : 'Choose a date';
+  const formattedTime = scheduledAt
+    ? scheduledAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : 'Choose a time';
+  const formattedRepeatTime = repeatTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const selectedRepeatLabels = WEEKDAYS
+    .filter((day) => repeatDays.includes(day.value))
+    .map((day) => day.label);
+  const scheduleSummary = scheduleType === 'REPEATING'
+    ? `Repeats on ${selectedRepeatLabels.join(', ') || 'no days selected'} at ${formattedRepeatTime}`
+    : scheduledAt
+    ? `One time on ${scheduledAt.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+    : 'Pick a day and time for this alarm';
+
+  const isScheduleValid = scheduleType === 'REPEATING' ? repeatDays.length > 0 : !!scheduledAt;
+  const isValid = title.length > 0 && reason.length > 0 && !!image_base64 && isScheduleValid;
+
+  const toggleRepeatDay = (day: AlarmWeekday) => {
+    setRepeatDays((current) =>
+      current.includes(day)
+        ? current.filter((value) => value !== day)
+        : [...current, day].sort((a, b) => a - b) as AlarmWeekday[],
+    );
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -101,17 +217,76 @@ export default function CreateAlarmScreen() {
         multiline numberOfLines={3} maxLength={500}
       />
 
-      <Text style={styles.section_label}>Date (YYYY-MM-DD)</Text>
-      <TextInput
-        style={styles.input} placeholder="2024-12-25" placeholderTextColor="#555"
-        value={fire_date} onChangeText={setFireDate} keyboardType="numeric"
-      />
+      <Text style={styles.section_label}>Schedule</Text>
+      <View style={styles.schedule_card}>
+        <Text style={styles.schedule_type_label}>Alarm type</Text>
+        <View style={styles.schedule_type_row}>
+          {(['ONE_TIME', 'REPEATING'] as ScheduleType[]).map((type) => (
+            <TouchableOpacity
+              key={type}
+              style={[styles.schedule_type_chip, scheduleType === type && styles.schedule_type_chip_active]}
+              onPress={() => setScheduleType(type)}
+            >
+              <Text style={[styles.schedule_type_chip_text, scheduleType === type && styles.schedule_type_chip_text_active]}>
+                {type === 'ONE_TIME' ? 'One time' : 'Repeating'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
-      <Text style={styles.section_label}>Time (HH:MM)</Text>
-      <TextInput
-        style={styles.input} placeholder="07:00" placeholderTextColor="#555"
-        value={fire_time} onChangeText={setFireTime} keyboardType="numeric"
-      />
+        {scheduleType === 'ONE_TIME' ? (
+          <View style={styles.schedule_row}>
+            <TouchableOpacity style={styles.schedule_button} onPress={openDatePicker}>
+              <Text style={styles.schedule_button_label}>Date</Text>
+              <Text style={styles.schedule_button_value}>{formattedDate}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.schedule_button} onPress={openTimePicker}>
+              <Text style={styles.schedule_button_label}>Time</Text>
+              <Text style={styles.schedule_button_value}>{formattedTime}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            <Text style={styles.schedule_button_label}>Days</Text>
+            <View style={styles.repeat_days_row}>
+              {WEEKDAYS.map((day) => {
+                const selected = repeatDays.includes(day.value);
+                return (
+                  <TouchableOpacity
+                    key={day.value}
+                    style={[styles.repeat_day_chip, selected && styles.repeat_day_chip_active]}
+                    onPress={() => toggleRepeatDay(day.value)}
+                  >
+                    <Text style={[styles.repeat_day_chip_text, selected && styles.repeat_day_chip_text_active]}>
+                      {day.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <TouchableOpacity style={styles.schedule_button} onPress={openTimePicker}>
+              <Text style={styles.schedule_button_label}>Time</Text>
+              <Text style={styles.schedule_button_value}>{formattedRepeatTime}</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        <Text style={styles.schedule_summary}>{scheduleSummary}</Text>
+
+        {pickerMode ? (
+          <View style={styles.picker_wrap}>
+            <DateTimePicker
+              mode={pickerMode}
+              value={scheduledAt ?? new Date()}
+              minimumDate={pickerMode === 'date' ? new Date() : undefined}
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={handlePickerChange}
+            />
+          </View>
+        ) : null}
+      </View>
 
       <Text style={styles.section_label}>Humor level</Text>
       <View style={styles.humor_grid}>
@@ -161,6 +336,24 @@ const styles = StyleSheet.create({
   section_label: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 8, marginTop: 20, textTransform: 'uppercase', letterSpacing: 1 },
   input: { backgroundColor: '#1a1a1a', color: '#fff', padding: 14, borderRadius: 12, fontSize: 15, borderWidth: 1, borderColor: '#2a2a2a' },
   input_multiline: { height: 90, textAlignVertical: 'top' },
+  schedule_card: { backgroundColor: '#1a1a1a', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#2a2a2a' },
+  schedule_type_label: { color: '#888', fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 },
+  schedule_type_row: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  schedule_type_chip: { flex: 1, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 999, backgroundColor: '#111', borderWidth: 1, borderColor: '#2a2a2a', alignItems: 'center' },
+  schedule_type_chip_active: { backgroundColor: '#2a1010', borderColor: '#f4511e' },
+  schedule_type_chip_text: { color: '#777', fontWeight: '700' },
+  schedule_type_chip_text_active: { color: '#f4511e' },
+  schedule_row: { flexDirection: 'row', gap: 10 },
+  schedule_button: { flex: 1, backgroundColor: '#111', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#2a2a2a' },
+  schedule_button_label: { color: '#888', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 },
+  schedule_button_value: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  schedule_summary: { color: '#777', fontSize: 13, marginTop: 12 },
+  picker_wrap: { marginTop: 12, backgroundColor: '#111', borderRadius: 12, overflow: 'hidden' },
+  repeat_days_row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  repeat_day_chip: { paddingHorizontal: 12, paddingVertical: 10, borderRadius: 999, backgroundColor: '#111', borderWidth: 1, borderColor: '#2a2a2a' },
+  repeat_day_chip_active: { backgroundColor: '#2a1010', borderColor: '#f4511e' },
+  repeat_day_chip_text: { color: '#aaa', fontWeight: '700' },
+  repeat_day_chip_text_active: { color: '#f4511e' },
   image_picker: { backgroundColor: '#1a1a1a', borderRadius: 16, height: 180, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2a2a2a', overflow: 'hidden' },
   image_placeholder: { color: '#555', fontSize: 15 },
   preview_image: { width: '100%', height: '100%', resizeMode: 'cover' },

@@ -4,6 +4,17 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../src/api/client';
 import type { AlarmResponse } from '@snapalarm/shared-types';
 
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function formatSchedule(alarm: AlarmResponse): string {
+  if (alarm.schedule_type === 'REPEATING') {
+    const days = alarm.repeat_days.map((day) => WEEKDAY_LABELS[day]).join(', ');
+    return `${days} at ${alarm.local_time ?? '--:--'}`;
+  }
+
+  return new Date(alarm.fire_time_utc).toLocaleString();
+}
+
 export default function AlarmsScreen() {
   const { data: alarms, isLoading, refetch, isRefetching } = useQuery<AlarmResponse[]>({
     queryKey: ['alarms'],
@@ -16,14 +27,14 @@ export default function AlarmsScreen() {
   const renderAlarm = ({ item }: { item: AlarmResponse }) => (
     <TouchableOpacity
       style={styles.card}
-      onPress={() => router.push({ pathname: '/(app)/alarm-detail', params: { id: item.id } })}
+      onPress={() => router.push({ pathname: '/alarm-detail', params: { id: item.id } })}
     >
       <View style={styles.card_header}>
         <Text style={styles.alarm_title} numberOfLines={1}>{item.title}</Text>
         <StatusBadge status={item.generation_status} />
       </View>
       <Text style={styles.alarm_time}>
-        {new Date(item.fire_time_utc).toLocaleString()}
+        {formatSchedule(item)}
       </Text>
       <Text style={styles.alarm_reason} numberOfLines={1}>{item.reason}</Text>
       <HumorBadge level={item.humor_level} />
@@ -44,7 +55,7 @@ export default function AlarmsScreen() {
             : <Text style={styles.empty}>No alarms yet. Create your first one!</Text>
         }
       />
-      <TouchableOpacity style={styles.fab} onPress={() => router.push('/(app)/create-alarm')}>
+      <TouchableOpacity style={styles.fab} onPress={() => router.push('/create-alarm')}>
         <Text style={styles.fab_text}>+</Text>
       </TouchableOpacity>
     </View>

@@ -32,6 +32,11 @@ enum AlarmMode {
   IMAGE_WITH_AUDIO
 }
 
+enum ScheduleType {
+  ONE_TIME
+  REPEATING
+}
+
 enum GenerationStatus {
   PENDING
   QUEUED_FOR_BATCH
@@ -115,6 +120,9 @@ model Alarm {
   reason                String
   humorLevel            Int              // 1-4
   fireTimeUtc           DateTime
+  scheduleType          ScheduleType     @default(ONE_TIME)
+  repeatDays            Int[]            @default([])
+  localTime             String?
   timezoneSource        String
   mode                  AlarmMode
   originalImageS3Key    String

@@ -8,6 +8,7 @@
 export type SubscriptionTier = 'FREE' | 'BASIC' | 'PRO';
 export type SubStatus = 'ACTIVE' | 'CANCELLED' | 'PAST_DUE' | 'TRIALING';
 export type AlarmMode = 'IMAGE_ONLY' | 'IMAGE_WITH_AUDIO';
+export type ScheduleType = 'ONE_TIME' | 'REPEATING';
 export type GenerationStatus =
   | 'PENDING'
   | 'QUEUED_FOR_BATCH'
@@ -20,6 +21,7 @@ export type GenerationStatus =
 export type ModerationStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'UNDER_REVIEW';
 
 export type HumorLevel = 1 | 2 | 3 | 4;
+export type AlarmWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 // ---- AI Service -------------------------------------------
 
@@ -106,9 +108,12 @@ export interface CreateAlarmRequest {
   title: string;
   reason: string;
   humor_level: HumorLevel;
-  fire_time_utc: string; // ISO 8601
+  fire_time_utc?: string; // ISO 8601 for one-time alarms, next occurrence for repeating alarms
   timezone_source: string;
   mode: AlarmMode;
+  schedule_type: ScheduleType;
+  repeat_days?: AlarmWeekday[];
+  local_time?: string; // HH:MM in the user's local timezone
   original_image_base64: string;
 }
 
@@ -118,6 +123,9 @@ export interface AlarmResponse {
   reason: string;
   humor_level: HumorLevel;
   fire_time_utc: string;
+  schedule_type: ScheduleType;
+  repeat_days: AlarmWeekday[];
+  local_time: string | null;
   mode: AlarmMode;
   generation_status: GenerationStatus;
   generated_image_url: string | null;

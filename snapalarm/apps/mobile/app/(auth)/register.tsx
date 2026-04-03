@@ -20,7 +20,7 @@ export default function RegisterScreen() {
       const { data } = await api.post('/auth/register', { email, password });
       await SecureStore.setItemAsync('access_token', data.access_token);
       await SecureStore.setItemAsync('refresh_token', data.refresh_token);
-      router.replace('/(app)/alarms');
+      router.replace('/alarms');
     } catch (err: any) {
       Alert.alert('Registration failed', err.response?.data?.error ?? 'Please try again');
     } finally {
