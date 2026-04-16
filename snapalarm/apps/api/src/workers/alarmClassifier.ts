@@ -35,6 +35,10 @@ export function classifyAlarm(fire_time_utc: Date, now_utc: Date = new Date()): 
 
   // >= 6h → assign to next eligible batch window
   const batch_window = assignBatchWindow(fire_time_utc);
+  // If the batch window already ran, generate immediately instead of leaving the alarm stuck
+  if (getBatchWindowRunTime(batch_window).getTime() <= now_utc.getTime()) {
+    return { type: 'IMMEDIATE_GENERATION' };
+  }
   return { type: 'QUEUED_FOR_BATCH', batch_window };
 }
 
@@ -99,7 +103,7 @@ export function getBatchWindowRunTime(window_key: string): Date {
 export function getCurrentBatchWindows(): string[] {
   const now = new Date();
   return BATCH_WINDOWS.map((w) => {
-    const date_str = w.name === 'BATCH_D' ? toDateStr(now) : toDateStr(now);
+    const date_str = w.name === 'BATCH_D' ? previousDay(now) : toDateStr(now);
     return `${w.name}_${date_str}`;
   });
 }

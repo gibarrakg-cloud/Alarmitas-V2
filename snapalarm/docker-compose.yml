@@ -7,10 +7,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: snapalarm
-      POSTGRES_PASSWORD: snapalarm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: snapalarm
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,12 +23,15 @@ services:
     image: redis:7-alpine
     container_name: snapalarm-redis
     restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD-SHELL', 'redis-cli -a $REDIS_PASSWORD ping']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -47,10 +50,10 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://snapalarm:snapalarm@postgres:5432/snapalarm
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://snapalarm:${POSTGRES_PASSWORD}@postgres:5432/snapalarm
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
     ports:
-      - '8081:8081'
+      - '3000:3000'
     volumes:
       - ./apps/api:/app/apps/api
       - ./packages:/app/packages

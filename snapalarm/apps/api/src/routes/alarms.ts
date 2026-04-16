@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { randomUUID } from 'crypto';
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '../prisma';
 import { classifyAlarm } from '../workers/alarmClassifier';
-import { alarmQueue } from '../workers/batchScheduler';
+import { alarmQueue, fallbackQueue } from '../workers/queues';
 import { computeNextRepeatingOccurrenceUtc } from '../utils/alarmSchedule';
 import type { CreateAlarmRequest, AlarmResponse, JwtPayload, AlarmWeekday } from '@snapalarm/shared-types';
 
@@ -59,6 +61,14 @@ const CreateAlarmSchema = z.object({
       });
     }
   }
+});
+
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? '',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
+  },
 });
 
 export async function alarmRoutes(app: FastifyInstance) {
@@ -131,10 +141,8 @@ export async function alarmRoutes(app: FastifyInstance) {
       return reply.status(402).send({ error: 'Insufficient credits', code: 'NO_CREDITS' });
     }
 
-    // Upload original image to S3 (returns S3 key)
-    const original_s3_key = `originals/${userId}/${Date.now()}.jpg`;
-    // NOTE: actual S3 upload delegated to alarmFallbackWorker / generation pipeline
-    // Here we store the key and will process async
+    const original_s3_key = `originals/${userId}/${Date.now()}-${randomUUID()}.jpg`;
+    await uploadOriginalImageToS3(original_s3_key, original_image_base64);
 
     const fireTimeUtc = schedule_type === 'REPEATING'
       ? computeNextRepeatingOccurrenceUtc(
@@ -145,53 +153,64 @@ export async function alarmRoutes(app: FastifyInstance) {
       : new Date(fire_time_utc!);
     const classification = classifyAlarm(fireTimeUtc);
 
-    const alarm = await prisma.alarm.create({
-      data: {
-        userId,
-        title,
-        reason,
-        humorLevel: humor_level,
-        fireTimeUtc,
-        scheduleType: schedule_type,
-        repeatDays: schedule_type === 'REPEATING'
-          ? [...new Set((repeat_days ?? []).slice().sort((a, b) => a - b))]
-          : [],
-        localTime: schedule_type === 'REPEATING' ? local_time! : null,
-        timezoneSource: timezone_source,
-        mode,
-        originalImageS3Key: original_s3_key,
-        generationStatus: classification.type === 'QUEUED_FOR_BATCH'
-          ? 'QUEUED_FOR_BATCH'
-          : classification.type === 'IMMEDIATE_GENERATION'
-          ? 'PENDING'
-          : 'PENDING',
-        batchWindow: classification.type === 'QUEUED_FOR_BATCH' ? classification.batch_window : null,
-      },
+    const alarm = await prisma.$transaction(async (tx) => {
+      const created = await tx.alarm.create({
+        data: {
+          userId,
+          title,
+          reason,
+          humorLevel: humor_level,
+          fireTimeUtc,
+          scheduleType: schedule_type,
+          repeatDays: schedule_type === 'REPEATING'
+            ? [...new Set((repeat_days ?? []).slice().sort((a, b) => a - b))]
+            : [],
+          localTime: schedule_type === 'REPEATING' ? local_time! : null,
+          timezoneSource: timezone_source,
+          mode,
+          originalImageS3Key: original_s3_key,
+          generationStatus: classification.type === 'QUEUED_FOR_BATCH' ? 'QUEUED_FOR_BATCH' : 'PENDING',
+          batchWindow: classification.type === 'QUEUED_FOR_BATCH' ? classification.batch_window : null,
+        },
+      });
+      if (tier !== 'PRO') {
+        await tx.user.update({ where: { id: userId }, data: { credits: { decrement: 1 } } });
+      }
+      return created;
     });
 
-    // Deduct credit (not for PRO)
-    if (tier !== 'PRO') {
-      await prisma.user.update({ where: { id: userId }, data: { credits: { decrement: 1 } } });
+    try {
+      if (classification.type === 'NO_AI_GENERATION') {
+        await fallbackQueue.add(
+          'no-ai-fallback',
+          { alarm_id: alarm.id, fallback_reason: 'no_ai_generation_lt_30m' },
+          { priority: 1, delay: 0 },
+        );
+      } else {
+        await alarmQueue.add(
+          classification.type === 'IMMEDIATE_GENERATION' ? 'immediate' : 'batch',
+          {
+            alarm_id: alarm.id,
+            user_id: userId,
+            original_image_base64,
+            title,
+            reason,
+            humor_level,
+            fire_time_utc: fireTimeUtc.toISOString(),
+            classification_type: classification.type,
+          },
+          { priority: classification.type === 'IMMEDIATE_GENERATION' ? 1 : 10, delay: 0 },
+        );
+      }
+    } catch (queueErr) {
+      await prisma.$transaction(async (tx) => {
+        await tx.alarm.delete({ where: { id: alarm.id } });
+        if (tier !== 'PRO') {
+          await tx.user.update({ where: { id: userId }, data: { credits: { increment: 1 } } });
+        }
+      });
+      return reply.status(503).send({ error: 'Service temporarily unavailable, please try again' });
     }
-
-    // Enqueue generation job
-    await alarmQueue.add(
-      classification.type === 'IMMEDIATE_GENERATION' ? 'immediate' : 'batch',
-      {
-        alarm_id: alarm.id,
-        user_id: userId,
-        original_image_base64,
-        title,
-        reason,
-        humor_level,
-        fire_time_utc: fireTimeUtc.toISOString(),
-        classification_type: classification.type,
-      },
-      {
-        priority: classification.type === 'IMMEDIATE_GENERATION' ? 1 : 10,
-        delay: 0,
-      },
-    );
 
     return reply.status(201).send(toAlarmResponse(alarm));
   });
@@ -199,7 +218,7 @@ export async function alarmRoutes(app: FastifyInstance) {
   // ---- DELETE /alarms/:id ---------------------------------
 
   app.delete<{ Params: { id: string } }>('/:id', { onRequest: [authenticate] }, async (request, reply) => {
-    const { sub: userId } = request.user as JwtPayload;
+    const { sub: userId, tier } = request.user as JwtPayload;
 
     const alarm = await prisma.alarm.findFirst({ where: { id: request.params.id, userId } });
     if (!alarm) return reply.status(404).send({ error: 'Alarm not found' });
@@ -211,11 +230,12 @@ export async function alarmRoutes(app: FastifyInstance) {
         data: { generationStatus: 'CANCELLED', isActive: false },
       });
     } else if (alarm.generationStatus === 'QUEUED_FOR_BATCH') {
-      // Refund 1 credit if cancelling before batch starts
-      await prisma.$transaction([
-        prisma.alarm.update({ where: { id: alarm.id }, data: { generationStatus: 'CANCELLED', isActive: false } }),
-        prisma.user.update({ where: { id: userId }, data: { credits: { increment: 1 } } }),
-      ]);
+      await prisma.$transaction(async (tx) => {
+        await tx.alarm.update({ where: { id: alarm.id }, data: { generationStatus: 'CANCELLED', isActive: false } });
+        if (tier !== 'PRO') {
+          await tx.user.update({ where: { id: userId }, data: { credits: { increment: 1 } } });
+        }
+      });
     } else {
       await prisma.alarm.update({ where: { id: alarm.id }, data: { isActive: false } });
     }
@@ -225,6 +245,25 @@ export async function alarmRoutes(app: FastifyInstance) {
 }
 
 // ---- Response mapper -------------------------------------
+
+async function uploadOriginalImageToS3(key: string, imageBase64: string): Promise<void> {
+  const bucket = process.env.S3_BUCKET_PRIVATE;
+  if (!bucket) {
+    throw new Error('S3_BUCKET_PRIVATE is not configured');
+  }
+
+  const payload = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
+  const buffer = Buffer.from(payload, 'base64');
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: 'image/jpeg',
+    }),
+  );
+}
 
 function toAlarmResponse(alarm: any): AlarmResponse {
   const effectiveFireTimeUtc = alarm.scheduleType === 'REPEATING'

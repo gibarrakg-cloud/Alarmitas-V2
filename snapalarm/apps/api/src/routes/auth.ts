@@ -49,10 +49,18 @@ export async function authRoutes(app: FastifyInstance) {
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
-    const user = await prisma.user.create({
-      data: { email, passwordHash, language, timezone },
-      select: { id: true, email: true, language: true, timezone: true, credits: true },
-    });
+    let user: { id: string; email: string; language: string; timezone: string; credits: number };
+    try {
+      user = await prisma.user.create({
+        data: { email, passwordHash, language, timezone },
+        select: { id: true, email: true, language: true, timezone: true, credits: true },
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        return reply.status(409).send({ error: 'Email already registered' });
+      }
+      throw err;
+    }
 
     const tokens = await issueTokens(app, user.id, user.email, 'FREE');
     return reply.status(201).send({ user, ...tokens });
